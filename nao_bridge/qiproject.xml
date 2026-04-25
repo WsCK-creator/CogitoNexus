@@ -1,0 +1,13 @@
+<project version="3">
+  <!-- Add your name and e-mail here
+    <maintainer email="...">Your Name</maintainer>
+  -->
+
+  <qibuild name="nao_bridge">
+	<depends runtime="true" buildtime="true" names="libnaoqi" />
+    <depends runtime="true" buildtime="true" names="alaudio" />
+    <!-- Add your project dependencies here
+    <depends buildtime="true" runtime="true" names="foo" />
+    -->
+ </qibuild>
+</project>

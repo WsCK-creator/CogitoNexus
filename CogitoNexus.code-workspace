@@ -1,0 +1,25 @@
+{
+    "folders": [
+        {
+            "path": ".",
+            "name": "⚙️ System & Scripts"
+        },
+        {
+            "path": "main_app",
+            "name": "🧠Brain (C++20 / VS 2022)"
+        },
+        {
+            "path": "nao_bridge",
+            "name": "🤖 NAO Bridge (C++14 / VS 2015)"
+        }
+        
+    ],
+    "settings": {
+        // Ukrywamy duplikaty w głównym folderze, żeby drzewo plików było czyste
+        "files.exclude": {
+            "main_app": true,
+            "nao_bridge": true,
+            ".git": true
+        }
+    }
+}

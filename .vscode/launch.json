@@ -1,0 +1,17 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "🚀 CogitoNexus: Debug & Run",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/dist/brain.exe",
+            "args": [],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}/dist",
+            "environment": [],
+            "console": "integratedTerminal",
+            "preLaunchTask": "Smart Build Check" 
+        }
+    ]
+}

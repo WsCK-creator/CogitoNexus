@@ -1,0 +1,23 @@
+{
+    "configurations": [
+        {
+            "name": "NAOqi Bridge (Win32)",
+            "includePath": [
+                "${workspaceFolder}/**",
+                "C:\\nao\\naoqi-sdk-c++-2.8.5.10\\include" 
+            ],
+            "defines": [
+                "_DEBUG",
+                "UNICODE",
+                "_UNICODE",
+                "WIN32"
+            ],
+            "windowsSdkVersion": "10.0.19041.0",
+            "compilerPath": "C:/Program Files (x86)/Microsoft Visual Studio 14.0/VC/bin/cl.exe",
+            "cStandard": "c11",
+            "cppStandard": "c++14",
+            "intelliSenseMode": "windows-msvc-x86"
+        }
+    ],
+    "version": 4
+}
