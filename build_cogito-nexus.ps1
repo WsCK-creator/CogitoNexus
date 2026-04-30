@@ -35,14 +35,40 @@ function Build-Brain {
     cp "$brain\build\Release\brain.exe" $dist -Force
 }
 
+# --- Funkcja sprawdzająca zmiany w kodzie ---
+function Test-NeedsBuild {
+    param (
+        [string]$SourceDir,
+        [string]$TargetFile
+    )
+    # Jeśli plik docelowy nie istnieje, wymuszamy budowanie
+    if (!(Test-Path $TargetFile)) { return $true }
+    
+    $targetDate = (Get-Item $TargetFile).LastWriteTime
+    
+    # Szukamy najnowszego pliku źródłowego (pomijając foldery kompilacji)
+    $latestSource = Get-ChildItem -Path $SourceDir -Recurse -File -Include *.cpp, *.hpp, *.h, *.c, CMakeLists.txt | 
+                    Where-Object { $_.FullName -notmatch '\\build|\\dist' } |
+                    Sort-Object LastWriteTime -Descending | 
+                    Select-Object -First 1
+                    
+    if ($null -ne $latestSource -and $latestSource.LastWriteTime -gt $targetDate) {
+        Write-Host "-> Wykryto modyfikację w pliku: $($latestSource.Name)" -ForegroundColor Magenta
+        return $true
+    }
+    return $false
+}
+
 # --- Logika wyboru ---
 if ($Module -eq "bridge") { Build-Bridge }
 elseif ($Module -eq "brain") { Build-Brain }
 elseif ($Module -eq "all") { Build-Bridge; Build-Brain }
 else { 
-    # Sprawdzanie czy pliki istnieją w odpowiednich miejscach
-    if (!(Test-Path "$dist\nao_bridge\nao_bridge.dll")) { Build-Bridge }
-    if (!(Test-Path "$dist\brain.exe")) { Build-Brain }
+    if (Test-NeedsBuild -SourceDir $bridge -TargetFile "$dist\nao_bridge\nao_bridge.dll") { Build-Bridge }
+    else { Write-Host "> Most (nao_bridge) jest aktualny." -F Green }
+
+    if (Test-NeedsBuild -SourceDir $brain -TargetFile "$dist\brain.exe") { Build-Brain }
+    else { Write-Host "> Mózg (main_app) jest aktualny." -F Green }
 }
 
 Write-Host "--- Gotowe ---" -F Cyan
