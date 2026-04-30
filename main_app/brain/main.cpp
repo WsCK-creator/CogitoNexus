@@ -1,4 +1,5 @@
 #include <iostream>
+#include <string>
 #include <windows.h>
 #include <direct.h>
 
@@ -10,11 +11,11 @@ int main() {
         std::cout << "[INFO] Szukam DLL w: " << cwd << std::endl;
     }
 
-    const char* dllPath = "nao_bridge.dll";
-    HMODULE hBridge = LoadLibraryA(dllPath);
+    std::string fullDllPath = std::string(cwd) + "\\nao_bridge\\nao_bridge.dll";
+    HMODULE hBridge = LoadLibraryExA(fullDllPath.c_str(), NULL, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
 
     if (!hBridge) {
-        std::cerr << "[ERROR] Nie mozna zaladowac: " << dllPath << std::endl;
+        std::cerr << "[ERROR] Nie mozna zaladowac: " << fullDllPath << std::endl;
         std::cerr << "Kod bledu Windows: " << GetLastError() << std::endl;
         std::cin.get();
         return 1;
