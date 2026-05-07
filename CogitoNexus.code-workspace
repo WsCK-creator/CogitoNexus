@@ -20,6 +20,9 @@
             "main_app": true,
             "nao_bridge": true,
             ".git": true
-        }
+        },
+        "geminicodeassist.inlineSuggestions.enableAuto": false,
+        "geminicodeassist.enableTelemetry": false,
+        "geminicodeassist.displayInlineContextHint": false
     }
 }

@@ -1,4 +1,8 @@
-param ($Module = "check")
+﻿param ($Module = "check")
+
+#$OutputEncoding = [System.Text.Encoding]::UTF8
+#[console]::InputEncoding = [System.Text.Encoding]::UTF8
+#[console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
 $dist = "$PSScriptRoot\dist"
 $bridge = "$PSScriptRoot\nao_bridge"
@@ -33,6 +37,7 @@ function Build-Brain {
     
     if (!(Test-Path $dist)) { mkdir $dist | Out-Null }
     cp "$brain\build\Release\brain.exe" $dist -Force
+    cp "$brain\build\Release\vad.dll" $dist -Force
 }
 
 # --- Funkcja sprawdzająca zmiany w kodzie ---
