@@ -9,7 +9,12 @@
             "args": [],
             "stopAtEntry": false,
             "cwd": "${workspaceFolder}/dist",
-            "environment": [],
+            "environment": [
+                {
+                    "name": "PATH",
+                    "value": "${workspaceFolder}\\dist\\whisper;${env:PATH}"
+                }
+            ],
             "console": "integratedTerminal",
             "preLaunchTask": "Smart Build Check" 
         }

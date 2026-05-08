@@ -23,6 +23,7 @@
         },
         "geminicodeassist.inlineSuggestions.enableAuto": false,
         "geminicodeassist.enableTelemetry": false,
-        "geminicodeassist.displayInlineContextHint": false
+        "geminicodeassist.displayInlineContextHint": false,
+        "geminicodeassist.chat.automaticScrolling": false
     }
 }

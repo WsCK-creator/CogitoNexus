@@ -37,6 +37,16 @@ function Build-Brain {
     
     if (!(Test-Path $dist)) { mkdir $dist | Out-Null }
     cp "$brain\build\Release\brain.exe" $dist -Force
+    
+    # Kopiowanie wygenerowanych plików .dll do podfolderu dist\whisper
+    $whisperDist = "$dist\whisper"
+    if (!(Test-Path $whisperDist)) { mkdir $whisperDist | Out-Null }
+    Get-ChildItem -Path "$brain\build" -Recurse -Filter "*.dll" | Copy-Item -Destination $whisperDist -Force
+    
+    # Automatyczne generowanie skryptu uruchomieniowego CogitoNexus.bat z pauzą na końcu
+    $batPath = "$dist\CogitoNexus.bat"
+    $batContent = "@echo off`r`nchcp 65001`r`nset PATH=%~dp0whisper;`%PATH%`r`nbrain.exe`r`npause"
+    Set-Content -Path $batPath -Value $batContent
 }
 
 # --- Funkcja sprawdzająca zmiany w kodzie ---

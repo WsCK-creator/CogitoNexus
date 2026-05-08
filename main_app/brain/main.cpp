@@ -8,6 +8,7 @@
 
 
 int main() {
+    system("chcp 65001");
     Brain brain;
     return 0;
 }

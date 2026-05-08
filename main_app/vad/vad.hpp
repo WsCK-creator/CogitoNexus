@@ -6,6 +6,8 @@
 #include <mutex>
 #include <chrono>
 #include <iostream>
+#include <fstream>
+#include <algorithm>
 
 #include "./../../dataTypes/dataTypes.hpp"
 #include "rnnoise.h"
@@ -27,12 +29,12 @@ public:
     ~VAD();
 
 private:
-    inline static std::queue<std::vector<unsigned short>> newAudioQueue;
+    inline static std::queue<std::vector<signed short>> newAudioQueue;
     inline static std::mutex newAudioMtx;
     inline static unsigned int _newSamplesCount = 0;
     inline static bool newAudioFlag = false;
     
-    std::queue<unsigned short> audioDataToProcess;
+    std::queue<signed short> audioDataToProcess;
     std::vector<std::array<float, SAMPLES_16K>> audioDataProcessed;
     std::vector<float> normalizedAudoData;
     std::vector<float> vdaScore;
@@ -49,4 +51,6 @@ private:
     void _moveAudtioToProcessing();
     void _convertToFloat();
     void _getVadAndNormalize();
+
+    void _exportToWav(const std::string& filename);
 };

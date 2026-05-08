@@ -17,6 +17,7 @@
 
 #include "./../../dataTypes/dataTypes.hpp"
 #include "vad.hpp"
+#include "whisper-wrapper.hpp"
 
 class Brain
 {
@@ -28,7 +29,7 @@ private:
 
     static void __stdcall _messageCallback(const char* str, DataTypes::MessageType type);
     static void __stdcall _errorCallback(const char* module, const char* error, DataTypes::Errorcodes code);
-    static void __stdcall audiCallback(std::vector<float> normalizedData);
+    //static void __stdcall audiCallback(std::vector<float> normalizedData);
     
     std::atomic<bool> _bridgeState{false};
     std::atomic<bool> _vadState{false};
@@ -37,6 +38,7 @@ private:
     HMODULE _hBridge = nullptr;
    
     inline static std::unique_ptr<VAD> _vad = nullptr;
+    inline static std::unique_ptr<WhisperWrapper> _whisper = nullptr;
     //inline static std::chrono::steady_clock::time_point audioTime;
     inline static std::queue<std::vector<unsigned short>> audioQueue;
     inline static std::mutex mtx;

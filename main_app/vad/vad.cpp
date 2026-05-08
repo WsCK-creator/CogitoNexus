@@ -4,13 +4,13 @@ void __stdcall VAD::audiCallback(const signed short *buffer, int count)
 {
     if(newAudioFlag)
     {
-        std::vector<unsigned short> local_buffer;
+        std::vector<signed short> local_buffer;
         local_buffer.reserve(3000);
         local_buffer.insert(local_buffer.end(), buffer, buffer + count);
         {
-                std::lock_guard<std::mutex> lock(newAudioMtx);
-                newAudioQueue.push(std::move(local_buffer));
-                _newSamplesCount += count;
+            std::lock_guard<std::mutex> lock(newAudioMtx);
+            newAudioQueue.push(std::move(local_buffer));
+            _newSamplesCount += count;
         }
     }
 }
@@ -19,10 +19,9 @@ void VAD::setNewAudio(bool b)
 {
     if(b && b != newAudioFlag )
     {
-        //TODO: Clear all data
         samplesCount = 0;
-        std::queue<std::vector<unsigned short>>().swap(newAudioQueue);
-        std::queue<unsigned short>().swap(audioDataToProcess);
+        std::queue<std::vector<signed short>>().swap(newAudioQueue);
+        std::queue<signed short>().swap(audioDataToProcess);
         audioDataProcessed.clear();
         normalizedAudoData.clear();
         vdaScore.clear();
@@ -37,6 +36,7 @@ bool VAD::getNewAudio()
 
 void VAD::update(DataTypes::VADDataCallback callback, std::atomic<bool>& state)
 {
+    std::cout << moduleName << "Starting procesing audio" << std::endl;
     while (state.load())
     {
         if(newAudioFlag)
@@ -47,14 +47,11 @@ void VAD::update(DataTypes::VADDataCallback callback, std::atomic<bool>& state)
             if(samplesCount >= quietThresholdTime)
             {
                 newAudioFlag = false;
-                for (unsigned int i = 0; i < samplesCount; i++)
-                {
-                    normalizedAudoData.pop_back();
-                    vdaScore.pop_back();
-                }
+                //TODO: Przekazać informację że dane są przetwarzane 
                 callback(normalizedAudoData);
             }
         }
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
 }
 
@@ -66,6 +63,7 @@ VAD::VAD()
 VAD::~VAD()
 {
     rnnoise_destroy(_rnnoise_state);
+    std::cout << moduleName << "Module destroyes" << std::endl;
 }
 
 void VAD::_moveAudtioToProcessing()
@@ -80,7 +78,7 @@ void VAD::_moveAudtioToProcessing()
             {
                 while(!newAudioQueue.empty())
                 {
-                    std::vector<unsigned short> temp = newAudioQueue.front();
+                    std::vector<signed short> temp = newAudioQueue.front();
                     for (unsigned short i = 0; i < temp.size(); i++)
                     {
                         audioDataToProcess.push(temp.at(i));
@@ -88,7 +86,7 @@ void VAD::_moveAudtioToProcessing()
                     newAudioQueue.pop();
                 }
             }
-            else std::queue<std::vector<unsigned short>>().swap(newAudioQueue);
+            else std::queue<std::vector<signed short>>().swap(newAudioQueue);
 
             _newSamplesCount = 0;
             newAudioMtx.unlock();
@@ -106,7 +104,7 @@ void VAD::_convertToFloat()
         std::array<float, SAMPLES_16K> temp;
         for (unsigned short i = 0; i < SAMPLES_16K; i++)
         {
-            temp[i] = static_cast<float>(static_cast<int>(audioDataToProcess.front()) - 32768);
+            temp[i] = static_cast<float>(audioDataToProcess.front());
             audioDataToProcess.pop();
         }
         audioDataProcessed.push_back(temp);
@@ -161,4 +159,57 @@ void VAD::_getVadAndNormalize()
         }
         audioDataProcessed.clear();
     }
+}
+
+void VAD::_exportToWav(const std::string& filename)
+{
+    // Otwieramy plik w trybie binarnym
+    std::ofstream file(filename, std::ios::binary);
+    if (!file)
+    {
+        std::cerr << moduleName << " Blad: Nie mozna otworzyc pliku do zapisu: " << filename << std::endl;
+        return;
+    }
+
+    uint32_t sample_rate = 16000; // Z Twojego kodu wynika, że to 16 kHz
+    uint16_t num_channels = 1;    // Mono
+    uint16_t bits_per_sample = 16;
+    
+    // Obliczamy rozmiary dla nagłówka WAV
+    uint32_t data_size = normalizedAudoData.size() * sizeof(int16_t);
+    uint32_t chunk_size = 36 + data_size;
+    uint32_t byte_rate = sample_rate * num_channels * sizeof(int16_t);
+    uint16_t block_align = num_channels * sizeof(int16_t);
+
+    // 1. Zapis subchunka RIFF
+    file.write("RIFF", 4);
+    file.write(reinterpret_cast<const char*>(&chunk_size), 4);
+    file.write("WAVE", 4);
+
+    // 2. Zapis subchunka fmt (format)
+    file.write("fmt ", 4);
+    uint32_t subchunk1_size = 16;
+    uint16_t audio_format = 1; // 1 oznacza nieskompresowane PCM
+    file.write(reinterpret_cast<const char*>(&subchunk1_size), 4);
+    file.write(reinterpret_cast<const char*>(&audio_format), 2);
+    file.write(reinterpret_cast<const char*>(&num_channels), 2);
+    file.write(reinterpret_cast<const char*>(&sample_rate), 4);
+    file.write(reinterpret_cast<const char*>(&byte_rate), 4);
+    file.write(reinterpret_cast<const char*>(&block_align), 2);
+    file.write(reinterpret_cast<const char*>(&bits_per_sample), 2);
+
+    // 3. Zapis subchunka data (dane audio)
+    file.write("data", 4);
+    file.write(reinterpret_cast<const char*>(&data_size), 4);
+
+    // 4. Konwersja z float [-1.0, 1.0] z powrotem na int16_t i zapis do pliku
+    for (float sample : normalizedAudoData)
+    {
+        // Zabezpieczenie (clamping), by nie przekroczyć zakresu int16_t
+        int16_t s = static_cast<int16_t>(std::max<float>(-32768.0f, std::min<float>(32767.0f, sample * 32767.0f)));
+        file.write(reinterpret_cast<const char*>(&s), 2);
+    }
+
+    file.close();
+    std::cout << moduleName << " Zapisano plik WAV (" << normalizedAudoData.size() << " probek): " << filename << std::endl;
 }
