@@ -1,14 +1,8 @@
 #include "vad.hpp"
 
-static std::queue<std::vector<unsigned short>> newAudioQueue;
-static std::mutex newAudioMtx;
-static unsigned int _newSamplesCount = 0;
-static bool getNewAudio = false;
-
-
 void __stdcall VAD::audiCallback(const signed short *buffer, int count)
 {
-    if(getNewAudio)
+    if(newAudioFlag)
     {
         std::vector<unsigned short> local_buffer;
         local_buffer.reserve(3000);
@@ -21,19 +15,44 @@ void __stdcall VAD::audiCallback(const signed short *buffer, int count)
     }
 }
 
-void VAD::update()
+void VAD::setNewAudio(bool b)
 {
-    while (true)
+    if(b && b != newAudioFlag )
     {
-        if(getNewAudio)
+        //TODO: Clear all data
+        samplesCount = 0;
+        std::queue<std::vector<unsigned short>>().swap(newAudioQueue);
+        std::queue<unsigned short>().swap(audioDataToProcess);
+        audioDataProcessed.clear();
+        normalizedAudoData.clear();
+        vdaScore.clear();
+    }
+    newAudioFlag = b;
+}
+
+bool VAD::getNewAudio()
+{
+    return newAudioFlag;
+}
+
+void VAD::update(DataTypes::VADDataCallback callback, std::atomic<bool>& state)
+{
+    while (state.load())
+    {
+        if(newAudioFlag)
         {
             _moveAudtioToProcessing();
             _convertToFloat();
             _getVadAndNormalize();
-            if(silience && std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - elapsedTime) > time)
+            if(samplesCount >= quietThresholdTime)
             {
-                getNewAudio = false;
-                //TODO: call whisper
+                newAudioFlag = false;
+                for (unsigned int i = 0; i < samplesCount; i++)
+                {
+                    normalizedAudoData.pop_back();
+                    vdaScore.pop_back();
+                }
+                callback(normalizedAudoData);
             }
         }
     }
@@ -51,26 +70,39 @@ VAD::~VAD()
 
 void VAD::_moveAudtioToProcessing()
 {
-    if(_newSamplesCount > 0 && newAudioMtx.try_lock())
+    //std::cout << moduleName << "Runing move audio:" << _newSamplesCount << std::endl;
+    if(_newSamplesCount > 0)
     {
-        while(!newAudioQueue.empty())
+        //std::cout<< moduleName << "New Data, count:" << _newSamplesCount << std::endl;
+        if(newAudioMtx.try_lock())
         {
-            std::vector temp = newAudioQueue.front();
-            for (unsigned short i = 0; i < temp.size(); i++)
+            if(newAudioFlag)
             {
-                audioDataToProcess.push(temp.at(i));
+                while(!newAudioQueue.empty())
+                {
+                    std::vector<unsigned short> temp = newAudioQueue.front();
+                    for (unsigned short i = 0; i < temp.size(); i++)
+                    {
+                        audioDataToProcess.push(temp.at(i));
+                    }
+                    newAudioQueue.pop();
+                }
             }
-            newAudioQueue.pop();
+            else std::queue<std::vector<unsigned short>>().swap(newAudioQueue);
+
+            _newSamplesCount = 0;
+            newAudioMtx.unlock();
         }
-        _newSamplesCount = 0;
-        newAudioMtx.unlock();
+        //else std::cout<< moduleName << "Data locked ;(" << std::endl;
     }
 }
 
 void VAD::_convertToFloat()
 {
-    while(audioDataToProcess.size() > 0 && audioDataToProcess.size() % SAMPLES_16K == 0)
+    //std::cout << moduleName << "Runing convert to float:" << audioDataToProcess.size() << std::endl;
+    while(audioDataToProcess.size() > 0 && (static_cast<int>(audioDataToProcess.size()) - SAMPLES_16K) >= 0)
     {
+        //std::cout << moduleName << "converting to float" << audioDataToProcess.size() << std::endl;
         std::array<float, SAMPLES_16K> temp;
         for (unsigned short i = 0; i < SAMPLES_16K; i++)
         {
@@ -83,8 +115,10 @@ void VAD::_convertToFloat()
 
 void VAD::_getVadAndNormalize()
 {
+    //std::cout << moduleName << "Runing get VAD" << std::endl;
     if(audioDataProcessed.size() > 0)
     {
+        //std::cout<< moduleName << "Processing New Data, size:" << audioDataProcessed.size() << std::endl;
         float temp_out[SAMPLES_48K];
         float temp_in[SAMPLES_48K];
         for (unsigned short i = 0; i < audioDataProcessed.size(); i++)
@@ -95,9 +129,9 @@ void VAD::_getVadAndNormalize()
                 float d2 = audioDataProcessed.at(i)[j + 1];
                 normalizedAudoData.push_back(d1 / 32768.0f); // normalization
 
-                temp_in[i * 3 + 0] = d1;
-                temp_in[i * 3 + 1] = d1 * 0.666f + d2 * 0.333f;
-                temp_in[i * 3 + 2] = d1 * 0.333f + d2 * 0.666f;
+                temp_in[j * 3 + 0] = d1;
+                temp_in[j * 3 + 1] = d1 * 0.666f + d2 * 0.333f;
+                temp_in[j * 3 + 2] = d1 * 0.333f + d2 * 0.666f;
             }
             float d = audioDataProcessed.at(i)[SAMPLES_16K - 1];
             normalizedAudoData.push_back(d / 32768.0f); //normalization
@@ -105,14 +139,25 @@ void VAD::_getVadAndNormalize()
             temp_in[SAMPLES_48K - 2] = d;
             temp_in[SAMPLES_48K - 1] = d;
 
-            //calculating vda
-            vdaScore.at(i) = rnnoise_process_frame(_rnnoise_state, temp_out, temp_in);
-            if (!silience && vdaScore.at(i) <= threshold)
+            // calculating vad
+            float score = rnnoise_process_frame(_rnnoise_state, temp_out, temp_in);
+            vdaScore.push_back(score); 
+            //std::cout << moduleName << "Procesed data score:" << score << std::endl;
+
+            if (samplesCount == 0 && score <= threshold)
             {
-                std::chrono::steady_clock::time_point elapsedTime = std::chrono::steady_clock::now();
-                silience = true;
+                samplesCount = 1;
+                std::cout << moduleName << "Silience detected" << std::endl; 
             }
-            else if (silience && vdaScore.at(i) >= threshold) silience = false;
+            else if (samplesCount > 0) 
+            {
+                if(score >= threshold)
+                {
+                    samplesCount = 0;
+                    std::cout << moduleName << "End of silience" << std::endl; 
+                }
+                else samplesCount++;
+            }
         }
         audioDataProcessed.clear();
     }

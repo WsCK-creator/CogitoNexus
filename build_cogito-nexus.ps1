@@ -37,7 +37,6 @@ function Build-Brain {
     
     if (!(Test-Path $dist)) { mkdir $dist | Out-Null }
     cp "$brain\build\Release\brain.exe" $dist -Force
-    cp "$brain\build\Release\vad.dll" $dist -Force
 }
 
 # --- Funkcja sprawdzająca zmiany w kodzie ---

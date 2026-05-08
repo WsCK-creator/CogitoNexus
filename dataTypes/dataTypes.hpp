@@ -20,6 +20,7 @@ namespace DataTypes
     typedef void(__stdcall* ErrorCallback)(const char* module, const char* error, Errorcodes code);
     typedef void(__stdcall* MessageCallback)(const char* str, MessageType type);
     typedef void(__stdcall* AudioCallback)(const signed short* buffer, int count);
+    typedef void(__stdcall* VADDataCallback)(std::vector<float> normalizedData);
 
     typedef void (*BridgeInitFunc)(DataTypes::MessageCallback, DataTypes::ErrorCallback, DataTypes::AudioCallback, const char*, int, bool);
     typedef void (*BridgeStopFunc)();

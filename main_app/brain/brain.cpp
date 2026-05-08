@@ -1,12 +1,5 @@
 #include "brain.hpp"
 
-DataTypes::BridgeStopFunc Brain::_bridgeStopFunc = nullptr;
-DataTypes::BridgeInitFunc Brain::_bridgeInitFunc = nullptr;
-std::queue<std::vector<unsigned short>> Brain::audioQueue;
-std::mutex Brain::mtx;
-unsigned int Brain::totalSamplesCount = 0;
-std::chrono::steady_clock::time_point Brain::audioTime;
-
 bool Brain::_init()
 {
     std::cout << "--- CogitoNexus: Main Brain Starting (C++20) ---" << std::endl;
@@ -58,17 +51,20 @@ bool Brain::_loadDLL()
 
 void Brain::_startNaoBridge(std::atomic<bool>& state)
 {
-    _bridgeInitFunc(_messageCallback, _errorCallback, _vad->audiCallback, "192.168.0.123", 9559, true);
-    std::cout << moduleName << "end of start func" << std::endl;
-    audioTime = std::chrono::steady_clock::now();
-    std::cout << moduleName << "Waiting 5s" << std::endl;
+    _bridgeInitFunc(_messageCallback, _errorCallback, _vad->audiCallback, "192.168.0.123", 9559, false);
+    std::cout << moduleName << "Broker started" << std::endl;
+    /*audioTime = std::chrono::steady_clock::now();
+    std::cout << moduleName << "Waiting 5s" << std::endl;*/
 }
 
-void Brain::_stopNaoBridge(std::atomic<bool>& state)
+void __stdcall Brain::audiCallback(std::vector<float> normalizedData)
+{
+}
+
+void Brain::_stopNaoBridge()
 {
     _bridgeStopFunc();
     std::cout << moduleName << "end of stop func" << std::endl;
-    state.store(false);
 }
 
 void Brain::_loop()
@@ -76,13 +72,31 @@ void Brain::_loop()
     while(true)
     {
         if(!_bridgeState.load()){
+            std::cout << moduleName << "Starting Broker" << std::endl;
             _naoBridgeThread = std::thread(&Brain::_startNaoBridge, std::ref(_bridgeState));
             _naoBridgeThread.detach();
-            audioTime = std::chrono::steady_clock::now();
-            std::cout << moduleName << "Waiting 5s" << std::endl;
+            /*audioTime = std::chrono::steady_clock::now();
+            std::cout << moduleName << "Waiting 5s" << std::endl;*/
             _bridgeState.store(true);
+            _vad->setNewAudio(true);
         }
-        std::chrono::steady_clock::time_point ct = std::chrono::steady_clock::now();
+        if(!_vadState.load())
+        {
+            std::cout << moduleName << "Starting VAD" << std::endl;
+            _vadState.store(true);
+            _vadThread = std::thread(&VAD::update, _vad.get(), audiCallback, std::ref(_vadState));
+            _vadThread.detach();
+        }
+        if(!_vad->getNewAudio())
+        {
+            std::cout << moduleName << "Stoping all" << std::endl;
+            _vadState.store(false);
+            if(_vadThread.joinable()) _vadThread.join();
+            std::thread stopNaoBridge(&Brain::_stopNaoBridge);
+            if(stopNaoBridge.joinable()) stopNaoBridge.join();
+            break;
+        }
+        /*std::chrono::steady_clock::time_point ct = std::chrono::steady_clock::now();
         if(std::chrono::duration_cast<std::chrono::milliseconds>(ct - audioTime) > std::chrono::seconds(5))
         {
             std::cout << moduleName << "Stoping broker" << std::endl;
@@ -91,7 +105,7 @@ void Brain::_loop()
             if(stop.joinable()) stop.join();
             saveQueueToWav("nagranie.wav", audioQueue, totalSamplesCount);
             break;
-        }
+        }*/
     }
     std::cout << "Samples: " << totalSamplesCount << std::endl;
 }
