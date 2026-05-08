@@ -1,6 +1,0 @@
-[submodule "main_app/whisper"]
-	path = main_app/whisper
-	url = https://github.com/ggerganov/whisper.cpp.git
-[submodule "main_app/vad/rnnoise"]
-	path = main_app/vad/rnnoise
-	url = https://github.com/xiph/rnnoise.git
