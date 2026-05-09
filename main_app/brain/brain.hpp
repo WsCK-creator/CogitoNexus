@@ -18,6 +18,7 @@
 #include "./../../dataTypes/dataTypes.hpp"
 #include "vad.hpp"
 #include "whisper-wrapper.hpp"
+#include "LLM.hpp"
 
 class Brain
 {
@@ -39,7 +40,7 @@ private:
    
     inline static std::unique_ptr<VAD> _vad = nullptr;
     inline static std::unique_ptr<WhisperWrapper> _whisper = nullptr;
-    //inline static std::chrono::steady_clock::time_point audioTime;
+    inline static std::unique_ptr<LLM> _llm = nullptr;
     inline static std::queue<std::vector<unsigned short>> audioQueue;
     inline static std::mutex mtx;
     inline static unsigned int totalSamplesCount = 0;

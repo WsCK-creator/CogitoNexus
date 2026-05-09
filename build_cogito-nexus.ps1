@@ -30,22 +30,47 @@ function Build-Bridge {
 
 function Build-Brain {
     Write-Host "> Buduje Mózg (main_app)..." -F Yellow
-    if (Test-Path "$brain\build") { rm -Recurse -Force "$brain\build" }
     
-    cmake -S $brain -B "$brain\build" -G "Visual Studio 17 2022" -A x64
-    cmake --build "$brain\build" --config Release
+    # 1. Szybka kompilacja inkrementalna (zostawiamy folder build w spokoju)
+    if (!(Test-Path "$brain\build")) {
+        Write-Host "  -> Generowanie nowych plików CMake..." -F DarkGray
+        cmake -S $brain -B "$brain\build" -G "Visual Studio 17 2022" -A x64
+    } else {
+        # Jeśli folder istnieje, tylko odświeżamy konfigurację
+        cmake -S $brain -B "$brain\build"
+    }
     
+    # 2. Wielowątkowa kompilacja (wykorzysta 100% procesora)
+    Write-Host "  -> Kompilacja..." -F DarkGray
+    cmake --build "$brain\build" --config Release --parallel
+    
+    # Kopiowanie pliku wykonywalnego
     if (!(Test-Path $dist)) { mkdir $dist | Out-Null }
     cp "$brain\build\Release\brain.exe" $dist -Force
     
-    # Kopiowanie wygenerowanych plików .dll do podfolderu dist\whisper
+    # -----------------------------------------------------------------
+    # 3. SEPARACJA BIBLIOTEK (Whisper w 'whisper', Llama w 'LLM')
+    # -----------------------------------------------------------------
+    Write-Host "  -> Kopiowanie bibliotek dynamicznych (DLL)..." -F DarkGray
+
+    # -- WHISPER --
     $whisperDist = "$dist\whisper"
     if (!(Test-Path $whisperDist)) { mkdir $whisperDist | Out-Null }
-    Get-ChildItem -Path "$brain\build" -Recurse -Filter "*.dll" | Copy-Item -Destination $whisperDist -Force
+    # Kopiujemy wszystkie DLL-ki zawierające "whisper" w nazwie
+    Get-ChildItem -Path "$brain\build" -Recurse -Filter "*whisper*.dll" | Copy-Item -Destination $whisperDist -Force
     
-    # Automatyczne generowanie skryptu uruchomieniowego CogitoNexus.bat z pauzą na końcu
+    # -- LLM (Llama + silnik matematyczny GGML + CUDA) --
+    $llmDist = "$dist\LLM"
+    if (!(Test-Path $llmDist)) { mkdir $llmDist | Out-Null }
+    # Kopiujemy pliki Llama oraz wszystkie odmiany silnika ggml (cuda, base, cpu)
+    Get-ChildItem -Path "$brain\build" -Recurse -Filter "*llama*.dll" | Copy-Item -Destination $llmDist -Force
+    Get-ChildItem -Path "$brain\build" -Recurse -Filter "*ggml*.dll" | Copy-Item -Destination $llmDist -Force
+
+    # -----------------------------------------------------------------
+    # 4. AKTUALIZACJA PLIKU BAT (na wypadek ręcznego uruchamiania)
+    # -----------------------------------------------------------------
     $batPath = "$dist\CogitoNexus.bat"
-    $batContent = "@echo off`r`nchcp 65001`r`nset PATH=%~dp0whisper;`%PATH%`r`nbrain.exe`r`npause"
+    $batContent = "@echo off`r`nchcp 65001`r`nset PATH=%~dp0LLM;%~dp0whisper;`%PATH%`r`nbrain.exe`r`npause"
     Set-Content -Path $batPath -Value $batContent
 }
 
@@ -55,12 +80,10 @@ function Test-NeedsBuild {
         [string]$SourceDir,
         [string]$TargetFile
     )
-    # Jeśli plik docelowy nie istnieje, wymuszamy budowanie
     if (!(Test-Path $TargetFile)) { return $true }
     
     $targetDate = (Get-Item $TargetFile).LastWriteTime
     
-    # Szukamy najnowszego pliku źródłowego (pomijając foldery kompilacji)
     $latestSource = Get-ChildItem -Path $SourceDir -Recurse -File -Include *.cpp, *.hpp, *.h, *.c, CMakeLists.txt | 
                     Where-Object { $_.FullName -notmatch '\\build|\\dist' } |
                     Sort-Object LastWriteTime -Descending | 

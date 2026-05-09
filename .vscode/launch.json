@@ -12,7 +12,7 @@
             "environment": [
                 {
                     "name": "PATH",
-                    "value": "${workspaceFolder}\\dist\\whisper;${env:PATH}"
+                    "value": "${workspaceFolder}\\dist\\LLM;${workspaceFolder}\\dist\\whisper;${env:PATH}"
                 }
             ],
             "console": "integratedTerminal",

@@ -3,7 +3,8 @@
 bool Brain::_init()
 {
     std::cout << "--- CogitoNexus: Main Brain Starting ---" << std::endl;
-    
+    std::cout << moduleName << "Loading LLM" << std::endl;
+    _llm = std::make_unique<LLM>("models/LLM/gemma-4-E4B-it-UD-Q4_K_XL.gguf");
     std::cout << moduleName << "Loading Whisper." << std::endl;
     _whisper = std::make_unique<WhisperWrapper>("models/whisper/ggml-large-v3-turbo.bin");
     std::cout << moduleName << "Loading VAD." << std::endl;
@@ -81,6 +82,7 @@ void Brain::_loop()
         }
         if(!_vad->getNewAudio() && _whisper->finished)
         {
+            _llm->generateResponse("siema");
             std::cout << moduleName << "Stoping all" << std::endl;
             _vadState.store(false);
             if(_vadThread.joinable()) _vadThread.join();

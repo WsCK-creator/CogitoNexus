@@ -1,5 +1,7 @@
 #include "whisper-wrapper.hpp"
 
+void my_whisper_log_callback(ggml_log_level level, const char * text, void * user_data);
+
 void __stdcall WhisperWrapper::audiCallback(std::vector<float> normalizedData)
 {
     std::cout << moduleName << "Converting audio" << std::endl;
@@ -35,6 +37,7 @@ void __stdcall WhisperWrapper::audiCallback(std::vector<float> normalizedData)
 
 WhisperWrapper::WhisperWrapper(const std::string &model_path)
 {
+    whisper_log_set(my_whisper_log_callback, nullptr);
     struct whisper_context_params cparams = whisper_context_default_params();
     
     // Loading Model    
@@ -53,4 +56,8 @@ WhisperWrapper::~WhisperWrapper()
 std::string WhisperWrapper::getText()
 {
     return data;
+}
+
+void my_whisper_log_callback(ggml_log_level level, const char * text, void * user_data) {
+    return;
 }
