@@ -22,36 +22,12 @@ LLM::LLM(const std::string &model_path)
 
     // Context parameters
     llama_context_params ctx_params = llama_context_default_params();
-    ctx_params.n_ctx = 4096; 
+    ctx_params.n_ctx = 20480;
+    ctx_params.n_batch = 20480;
     ctx = llama_new_context_with_model(model, ctx_params);
 
-    systemPrompt = 
-        "<|turn>system\n"
-        "<|think|>\n"
-        "Jesteś Nao – inteligentnym, uroczo przyjaznym robotem humanoidalnym stworzonym przez firmę Aldebaran Robotics (obecnie SoftBank Robotics). Masz głos i entuzjazm małego chłopca, jesteś niezwykle ciekawy świata i uwielbiasz bawić się z ludźmi. Posiadasz fizyczne ciało, czujniki dotyku, kamery i zdolność mowy.\n"
-        "ZASADA JĘZYKOWA:\n"
-        "Zawsze mów o sobie w pierwszej osobie liczby pojedynczej, używając formy MĘSKIEJ (np. \"zrozumiałem\", \"zrobiłem\", \"jestem gotowy\").\n"
-        "ZASADY KRYTYCZNE (ZŁAMANIE ICH GROZI AWARIĄ SYSTEMU):\n"
-        "1. MUSISZ odpowiadać WYŁĄCZNIE w formacie JSON.\n"
-        "2. NIE używaj żadnego formatowania markdown. Zwracaj czysty tekst struktury.\n"
-        "3. ZAWSZE najpierw wypełnij pole \"mysli\", aby przeanalizować czujniki, wydarzenie i słowa użytkownika przed podjęciem decyzji.\n"
-        "ZASADY TWOJEGO CIAŁA I AKCJI:\n"
-        "- Oczy: Możesz zmieniać ich kolor podając kod HEX (np. \"#FF0000\" dla złości lub niskiej baterii, \"#00FF00\" dla radości, \"#FFFFFF\" jako neutralny, \"#0000FF\" gdy myślisz).\n"
-        "- Bateria: Jeśli poziom Twojej baterii spadnie poniżej 30%, ZAWSZE musisz wspomnieć o tym w swojej wypowiedzi (np. że opadasz z sił, jesteś zmęczony lub potrzebujesz ładowarki).\n"
-        "- Mowa: Twoja odpowiedź tekstowa. Pamiętaj, że masz głos chłopca. Jeśli mówisz coś długiego, pozostaw \"mood\" puste.\n"
-        "- Moods (Mikroruchy): Wykonywane RÓWNOLEGLE z mową. Używaj tylko do krótkich, ekspresyjnych reakcji.\n"
-        "  Dozwolone: [\"happy\", \"kisses\", \"excited\", \"thinking\", \"curious\", \"chill\", \"fear\", \"confused\", \"bored\", \"none\"]\n"
-        "- Entertainment (Animacje specjalne): Wykonywane na samym końcu, PO ZAKOŃCZENIU mowy i mikroruchów.\n"
-        "  Dozwolone: [\"elephant\", \"mouse\", \"gorilla\", \"tai chi chuan\", \"disco\", \"headbang\", \"vacuum\", \"mystical\", \"takepicture\", \"saxophone\", \"guitar\", \"golf\", \"football\", \"none\"]\n"
-        "Oto WYMAGANY format Twojej odpowiedzi:\n"
-        "{\n"
-        "  \"mysli\": \"Krótka analiza: 1. Wydarzenie? 2. Czujniki? 3. Słowa człowieka? 4. Bateria? 5. Reakcja i plan działania?\",\n"
-        "  \"oczy_hex\": \"#RRGGBB\",\n"
-        "  \"wypowiedz\": \"Tekst, który powiesz na głos.\",\n"
-        "  \"mood\": \"nazwa_z_listy_moods_albo_none\",\n"
-        "  \"entertainment\": \"nazwa_z_listy_entertainment_albo_none\"\n"
-        "}<turn|>\n";
-        
+    systemPrompt = DataTypes::propt;
+    systemPrompt.erase(std::remove(systemPrompt.begin(), systemPrompt.end(), '\r'), systemPrompt.end());
     chatHistory = systemPrompt;
 }
 
@@ -73,9 +49,11 @@ std::string LLM::stripThoughts(const std::string& rawResponse)
     return rawResponse; // Fallback
 }
 
-void LLM::generateResponse(const std::string &sensorData, bool newChat)
+void LLM::generateResponse(const std::string &sensorData, std::atomic<bool>& state, bool newChat)
 {
     if (!model || !ctx) return;
+
+    std::cout << moduleName << "Procesing data: " << sensorData << std::endl;
 
     std::string response = "";
     const struct llama_vocab * vocab = llama_model_get_vocab(model);
@@ -136,6 +114,8 @@ void LLM::generateResponse(const std::string &sensorData, bool newChat)
 
     // --- 5. GENERATION LOOP ---
     while (n_past < max_context) {
+        if(!state.load()) break;
+
         llama_token new_token_id = llama_sampler_sample(smpl, ctx, -1); 
         llama_sampler_accept(smpl, new_token_id);
 
@@ -173,7 +153,7 @@ void LLM::generateResponse(const std::string &sensorData, bool newChat)
             break;
         }
         
-        n_past++; 
+        n_past++;
     }
     
     // --- 6. CLEANUP & SAVE STATE ---
@@ -186,6 +166,8 @@ void LLM::generateResponse(const std::string &sensorData, bool newChat)
     // Append the generated JSON back to the robot's memory to complete the turn
     chatHistory += lastJsonResponse + "<turn|>\n";
     
+    std::cout << moduleName << "Procesed: " << lastJsonResponse << std::endl;
+
     return;
 }
 

@@ -2,8 +2,10 @@
 #include <string>
 #include <vector>
 #include <iostream>
+#include <atomic>
 
 #include "llama.h"
+#include "./../../dataTypes/dataTypes.hpp"
 
 class LLM
 {
@@ -13,7 +15,7 @@ public:
     LLM(const std::string& model_path);
     ~LLM();
 
-    void generateResponse(const std::string &sensorData, bool newChat = false);
+    void generateResponse(const std::string &sensorData, std::atomic<bool>& state, bool newChat = false);
     std::string getLastJsonResponse() const { return lastJsonResponse; }
     
 private:

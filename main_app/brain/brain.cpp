@@ -2,6 +2,8 @@
 
 bool Brain::_init()
 {
+    start_time = std::chrono::steady_clock::now();
+
     std::cout << "--- CogitoNexus: Main Brain Starting ---" << std::endl;
     std::cout << moduleName << "Loading LLM" << std::endl;
     _llm = std::make_unique<LLM>("models/LLM/gemma-4-E4B-it-UD-Q4_K_XL.gguf");
@@ -11,8 +13,6 @@ bool Brain::_init()
     _vad = std::make_unique<VAD>();
 
     if(!_loadDLL()) return true;
-
-    //_startNaoBridge();
 
     return false;
 }
@@ -38,6 +38,8 @@ bool Brain::_loadDLL()
 
     _bridgeInitFunc = (DataTypes::BridgeInitFunc)GetProcAddress(_hBridge, "nao_bridge_init");
     _bridgeStopFunc = (DataTypes::BridgeStopFunc)GetProcAddress(_hBridge, "nao_bridge_stop");
+    _dataToNaoFunc = (DataTypes::DataToNaoFunc)GetProcAddress(_hBridge, "send_to_nao");
+    _procesingStartedFunc = (DataTypes::ProcessingStartedFunc)GetProcAddress(_hBridge, "processing_started");
 
     if (!_bridgeInitFunc) {
         std::cerr << "[ERROR] Nie znaleziono funkcji 'nao_bridge_init'! Blad: " << GetLastError() << std::endl;
@@ -47,12 +49,20 @@ bool Brain::_loadDLL()
         std::cerr << "[ERROR] Nie znaleziono funkcji 'nao_bridge_stop'! Blad: " << GetLastError() << std::endl;
         return true;
     }
+    if (!_dataToNaoFunc) {
+        std::cerr << "[ERROR] Nie znaleziono funkcji 'send_to_nao'! Blad: " << GetLastError() << std::endl;
+        return true;
+    }
+    if (!_procesingStartedFunc) {
+        std::cerr << "[ERROR] Nie znaleziono funkcji 'processing_started'! Blad: " << GetLastError() << std::endl;
+        return true;
+    }
     return false;
 }
 
 void Brain::_startNaoBridge(std::atomic<bool>& state)
 {
-    _bridgeInitFunc(_messageCallback, _errorCallback, _vad->audiCallback, "192.168.0.123", 9559, false);
+    _bridgeInitFunc(_messageCallback, _errorCallback, _vad->audiCallback, _fromNaoGetAudio, "192.168.0.123", 9559, false);
     std::cout << moduleName << "Broker started" << std::endl;
 }
 
@@ -60,6 +70,21 @@ void Brain::_stopNaoBridge()
 {
     _bridgeStopFunc();
     std::cout << moduleName << "end of stop func" << std::endl;
+}
+
+void Brain::_whenWhisperFinished(std::atomic<bool>& state)
+{
+    auto current_time = std::chrono::steady_clock::now();
+    bool newChat = false;
+    if (current_time - start_time >= std::chrono::minutes(1)) newChat = true;
+    else start_time = std::chrono::steady_clock::now();
+    std::string str = "=== TWÓJ BIEŻĄCY STAN FIZYCZNY I OTOCZENIE ===\n"
+    + _dataFromNao
+    + "\n=== SŁOWA UŻYTKOWNIKA  ===\n\""
+    + _whisper->getText() + "\"\n";
+    _llm->generateResponse(str, state, newChat);
+    _dataToNaoFunc(_llm->getLastJsonResponse().c_str());
+    state.store(false);
 }
 
 void Brain::_loop()
@@ -71,26 +96,28 @@ void Brain::_loop()
             _naoBridgeThread = std::thread(&Brain::_startNaoBridge, std::ref(_bridgeState));
             _naoBridgeThread.detach();
             _bridgeState.store(true);
-            _vad->setNewAudio(true);
+            std::cout << moduleName << "Working" << std::endl;
         }
-        if(!_vadState.load())
+        if(_whisper->finished && !_llmState.load())
         {
-            std::cout << moduleName << "Starting VAD" << std::endl;
-            _vadState.store(true);
-            _vadThread = std::thread(&VAD::update, _vad.get(), _whisper->audiCallback, std::ref(_vadState));
-            _vadThread.detach();
+            if(_llmThread.joinable()) _llmThread.join();
+            _whisper->finished = false;
+            _llmState.store(true);
+            _llmThread = std::thread(&Brain::_whenWhisperFinished, std::ref(_llmState));
         }
-        if(!_vad->getNewAudio() && _whisper->finished)
+        if (_kbhit())
         {
-            _llm->generateResponse("siema");
             std::cout << moduleName << "Stoping all" << std::endl;
             _vadState.store(false);
             if(_vadThread.joinable()) _vadThread.join();
+            _llmState.store(false);
+            if(_llmThread.joinable()) _llmThread.join();
             std::thread stopNaoBridge(&Brain::_stopNaoBridge);
             if(stopNaoBridge.joinable()) stopNaoBridge.join();
             break;
         }
-    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(30));
     }
     //std::cout << "Samples: " << totalSamplesCount << std::endl;
 }
@@ -136,6 +163,26 @@ void __stdcall Brain::_errorCallback(const char *module, const char *error, Data
     }
 }
 
+void __stdcall Brain::_fromNaoGetAudio(const char* data)
+{
+    std::cout << moduleName << "Recived data form nao: " << data << std::endl;
+    if(!_vadState.load())
+    {
+        _dataFromNao = data;
+        _vad->setNewAudio(true);
+        std::cout << moduleName << "Starting VAD" << std::endl;
+        _vadState.store(true);
+        _vadThread = std::thread(&VAD::update, _vad.get(), _vadCallback, std::ref(_vadState));
+        _vadThread.detach();
+    }
+}
+
+void __stdcall Brain::_vadCallback(std::vector<float> normalizedData)
+{
+    _procesingStartedFunc();
+    _whisper->audiCallback(normalizedData);
+}
+
 Brain::Brain()
 {
     if (!_init()) return;
@@ -147,3 +194,4 @@ Brain::~Brain()
     FreeLibrary(_hBridge);
     std::cout << "----------------------Program zakończył pracę----------------------";
 }
+

@@ -46,9 +46,10 @@ void VAD::update(DataTypes::VADDataCallback callback, std::atomic<bool>& state)
             _getVadAndNormalize();
             if(samplesCount >= quietThresholdTime)
             {
-                newAudioFlag = false;
-                //TODO: Przekazać informację że dane są przetwarzane 
+                setNewAudio(false);
+                state.store(false);
                 callback(normalizedAudoData);
+                break;
             }
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(5));

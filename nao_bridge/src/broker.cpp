@@ -2,7 +2,7 @@
 
 static Broker* gBrokerInstance = nullptr;
 
-Broker::Broker(DataTypes::MessageCallback mcb, DataTypes::ErrorCallback ecb, DataTypes::AudioCallback acb, std::string robotIpValue, int robotPortValue, bool silentQiLog)
+Broker::Broker(DataTypes::MessageCallback mcb, DataTypes::ErrorCallback ecb, std::string robotIpValue, int robotPortValue, bool silentQiLog)
     : _robotIp(robotIpValue), _robotPort(robotPortValue), _mockArgc(1)
 {
     gBrokerInstance = this;
@@ -27,7 +27,7 @@ Broker::Broker(DataTypes::MessageCallback mcb, DataTypes::ErrorCallback ecb, Dat
     _messageStream.str("");
 }
 
-void Broker::init(DataTypes::AudioCallback acb)
+void Broker::init(DataTypes::AudioCallback acb, DataTypes::DataFromNaoCallback fr_cb)
 {
     try
     {
@@ -45,14 +45,20 @@ void Broker::init(DataTypes::AudioCallback acb)
 
         _broker = AL::ALBroker::createBroker(_brokerName, "0.0.0.0", 54000, _robotIp, _robotPort);
         
-
         _messageStream << appName << "Connected to: " << _robotIp << ":" << _robotPort << std::endl 
                         << appName << "Starting " << SoundModule::moduleName << "." << std::endl;
         _messageCallback(_messageStream.str().c_str(), DataTypes::MessageType::MLog);
         _messageStream.str("");
 
-        _soundModule = AL::ALModule::createModule<SoundModule>(_broker, "SoundModule");
+        _soundModule = AL::ALModule::createModule<SoundModule>(_broker, SoundModule::moduleName);
         _soundModule->setCallbacks(acb, moduleMessageCallback);
+
+        _messageStream << appName << "Starting " << MemoryModule::moduleName << "." << std::endl;
+        _messageCallback(_messageStream.str().c_str(), DataTypes::MessageType::MLog);
+        _messageStream.str("");
+
+        _memoryModuel = AL::ALModule::createModule<MemoryModule>(_broker, MemoryModule::moduleName);
+        _memoryModuel->setCallbacks(fr_cb);
         
     }
     catch(const AL::ALError& e)
@@ -83,6 +89,16 @@ void __stdcall Broker::moduleMessageCallback(const char* error, DataTypes::Error
     }
 }
 
+void Broker::sendProcessedData(const char *data)
+{
+    if(_memoryModuel) _memoryModuel->sendProcessedData(data);
+}
+
+void Broker::processingEvent()
+{
+    if(_memoryModuel) _memoryModuel->processingEvent();
+}
+
 Broker::~Broker()
 {
 
@@ -97,6 +113,16 @@ Broker::~Broker()
     _soundModule.reset();
 
     _messageStream << appName << SoundModule::moduleName << " destroyed." << std::endl;
+    _messageCallback(_messageStream.str().c_str(), DataTypes::MessageType::MLog);
+    _messageStream.str("");
+
+    _messageStream << appName << "Stopping " << MemoryModule::moduleName << std::endl;
+    _messageCallback(_messageStream.str().c_str(), DataTypes::MessageType::MLog);
+    _messageStream.str("");
+
+    _memoryModuel.reset();
+
+    _messageStream << appName << MemoryModule::moduleName << " destroyed." << std::endl;
     _messageCallback(_messageStream.str().c_str(), DataTypes::MessageType::MLog);
     _messageStream.str("");
 

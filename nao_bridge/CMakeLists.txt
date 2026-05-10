@@ -6,6 +6,7 @@ qi_create_lib(nao_bridge SHARED
 src/bridge_main.cpp
 src/broker.cpp
 src/sound_module.cpp
+src/memory_module.cpp
 )
 
 qi_use_lib(nao_bridge ALCOMMON ALPROXIES ALAUDIO QI)
