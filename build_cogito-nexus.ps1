@@ -12,20 +12,29 @@ function Build-Bridge {
     Write-Host "> Buduje Most (nao_bridge)..." -F Yellow
     $oldPath = $env:PATH
     $env:PATH = "C:\Program Files\CMake-3.2.3\bin;" + $env:PATH
-    
+
+    # VCTargetsPath trzeba wskazać ręcznie na v140 -- inaczej MSBuild nie
+    # potrafi znaleźć targetów C++ dla starego toolsetu, którego wymaga
+    # SDK NAOqi. Ustawiamy to TYLKO na czas budowania mostu i przywracamy
+    # zaraz potem, żeby nie zepsuć budowania main_app (który wymaga własnej,
+    # dynamicznie wykrywanej ścieżki v143 z VS2022).
+    $oldVCTargetsPath = $env:VCTargetsPath
+    $env:VCTargetsPath = "C:\Program Files (x86)\MSBuild\Microsoft.Cpp\v4.0\V140\"
+
     Push-Location $bridge
     if (Test-Path "build-nao-bridge-config") { rm -Recurse -Force "build-nao-bridge-config" }
-    
+
     $vs = "C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\Tools\VsDevCmd.bat"
     cmd /c "`"$vs`" -arch=x64 && qibuild configure -c nao-bridge-config --release && qibuild make -c nao-bridge-config"
-    
+
     # Tworzenie specyficznego podfolderu w dist
     $target = "$dist\nao_bridge"
     if (!(Test-Path $target)) { mkdir $target | Out-Null }
-    
+
     cp "build-nao-bridge-config/sdk/bin/*" $target -Force
     Pop-Location
     $env:PATH = $oldPath
+    $env:VCTargetsPath = $oldVCTargetsPath
 }
 
 function Build-Brain {

@@ -19,23 +19,31 @@ set(WHISPER_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(WHISPER_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 add_subdirectory(whisper/whisper.cpp)
 
-add_executable(brain 
+add_executable(brain
     brain/main.cpp
     brain/brain.cpp
     vad/vad.cpp
     whisper/whisper-wrapper.cpp
     LLM/LLM.cpp
+    booster/BoosterBridge.cpp
 )
 
 target_compile_features(brain PRIVATE cxx_std_20)
 
-target_include_directories(brain PRIVATE 
-    vad/rnnoise/include 
-    whisper 
-    vad 
+target_include_directories(brain PRIVATE
+    vad/rnnoise/include
+    whisper
+    vad
     whisper/whisper.cpp/include
-    LLM                        
-    LLM/llama.cpp/include      
+    LLM
+    LLM/llama.cpp/include
+    # Katalog main_app/ -- potrzebny, żeby "#include "booster/BoosterBridge.hpp""
+    # w brain.hpp w ogóle się rozwiązywało (booster/ leży obok brain/, nie w nim).
+    ${CMAKE_CURRENT_SOURCE_DIR}
 )
 target_link_directories(brain PRIVATE ${CMAKE_BINARY_DIR}/vad/rnnoise/$<CONFIG>)
 target_link_libraries(brain rnnoise whisper llama)
+
+if (WIN32)
+    target_link_libraries(brain ws2_32)
+endif()

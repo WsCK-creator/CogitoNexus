@@ -3,6 +3,7 @@
 #include <vector>
 #include <iostream>
 #include <atomic>
+#include <algorithm> // std::remove (używane w LLM.cpp przy budowaniu systemPrompt)
 
 #include "llama.h"
 #include "./../../dataTypes/dataTypes.hpp"
@@ -12,7 +13,7 @@ class LLM
 public:
     static constexpr const char* moduleName = "[LLM] ";
 
-    LLM(const std::string& model_path);
+    LLM(const std::string& model_path, DataTypes::RobotType robotType, const std::string& context = "");
     ~LLM();
 
     void generateResponse(const std::string &sensorData, std::atomic<bool>& state, bool newChat = false);

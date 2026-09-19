@@ -1,0 +1,27 @@
+[Unit]
+Description=CogitoNexus Server for Booster K1
+After=network.target
+Restart=always
+RestartSec=3
+StartLimitBurst=5
+StartLimitInterval=60
+
+[Service]
+Type=simple
+User=booster
+WorkingDirectory=/home/booster/projects/booster-CogitoNexus
+Environment=FASTRTPS_DEFAULT_PROFILES_FILE=/opt/booster/BoosterRos2/fastdds_profile.xml
+Environment=LD_LIBRARY_PATH=/home/booster/projects/booster-CogitoNexus/tts_venv/lib/python3.10/site-packages/nvidia/cu12/lib:/usr/local/cuda-12.6/targets/aarch64-linux/lib
+ExecStart=/home/booster/projects/booster-CogitoNexus/build/cogito_server 9000 /home/booster/projects/booster-CogitoNexus/mms-model/pl_PL "" /home/booster/projects/booster-CogitoNexus/mms_worker.py 1.0 1.0
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=cogito-server
+
+# Security
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/home/booster/projects/booster-CogitoNexus
+ProtectHome=read-only
+
+[Install]
+WantedBy=multi-user.target

@@ -2,7 +2,7 @@
 
 void my_log_callback(ggml_log_level level, const char * text, void * user_data);
 
-LLM::LLM(const std::string &model_path)
+LLM::LLM(const std::string &model_path, DataTypes::RobotType robotType, const std::string &context)
 {
     std::cout << moduleName << "Initializing backend..." << std::endl;
     llama_log_set(my_log_callback, nullptr);
@@ -26,7 +26,38 @@ LLM::LLM(const std::string &model_path)
     ctx_params.n_batch = 20480;
     ctx = llama_new_context_with_model(model, ctx_params);
 
-    systemPrompt = DataTypes::propt;
+    // DataTypes::propt nie istnieje -- każdy robot ma swój własny prompt
+    // systemowy (format wypowiedzi/animacji jest inny dla NAO i dla Boostera).
+    switch (robotType)
+    {
+    case DataTypes::RobotType::Booster:
+        systemPrompt = DataTypes::prompt_booster;
+        break;
+    case DataTypes::RobotType::NAO:
+    default:
+        systemPrompt = DataTypes::prompt_nao;
+        break;
+    }
+
+    // Kontekst sytuacji/wydarzenia wpisywany na starcie programu (main.cpp,
+    // zmienna "situation") docierał do Brain (jako _robotContext), ale nigdy
+    // dalej -- ani LLM, ani _whenWhisperFinished() go nie używały, więc
+    // wpisany kontekst zawsze i tak był ignorowany przez model. Wstrzykujemy
+    // go tutaj, PRZED zamykającym tagiem "<|turn|>" promptu systemowego (a
+    // nie za nim), żeby nadal był częścią bloku "system", a nie osobnym,
+    // nierozpoznanym fragmentem tekstu.
+    if (!context.empty())
+    {
+        const std::string closingTag = "<|turn|>";
+        std::string contextBlock = "\n\n=== KONTEKST DZISIEJSZEJ SYTUACJI/WYDARZENIA ===\n" + context + "\n";
+        size_t pos = systemPrompt.rfind(closingTag);
+        if (pos != std::string::npos) {
+            systemPrompt.insert(pos, contextBlock);
+        } else {
+            systemPrompt += contextBlock;
+        }
+    }
+
     systemPrompt.erase(std::remove(systemPrompt.begin(), systemPrompt.end(), '\r'), systemPrompt.end());
     chatHistory = systemPrompt;
 }

@@ -1,7 +1,22 @@
 #include "vad.hpp"
+#include <filesystem>
+#include <ctime>
+#include <cmath>
 
 void __stdcall VAD::audiCallback(const signed short *buffer, int count)
 {
+    // Bufor historii aktualizujemy ZAWSZE, niezależnie od newAudioFlag --
+    // to on trzyma ostatnią ~1s audio, z której korzysta setNewAudio(true)
+    // jako "pre-roll" w chwili triggera (przycisk na Boosterze / event
+    // ProcessData z NAO).
+    {
+        std::lock_guard<std::mutex> lock(_historyMtx);
+        _historyBuffer.insert(_historyBuffer.end(), buffer, buffer + count);
+        if (_historyBuffer.size() > PRE_ROLL_SAMPLES) {
+            _historyBuffer.erase(_historyBuffer.begin(), _historyBuffer.end() - PRE_ROLL_SAMPLES);
+        }
+    }
+
     if(newAudioFlag)
     {
         std::vector<signed short> local_buffer;
@@ -20,11 +35,25 @@ void VAD::setNewAudio(bool b)
     if(b && b != newAudioFlag )
     {
         samplesCount = 0;
+        _speechStarted = false;
+        _totalFrameCount = 0;
+        _voicedFrameCount = 0;
         std::queue<std::vector<signed short>>().swap(newAudioQueue);
         std::queue<signed short>().swap(audioDataToProcess);
         audioDataProcessed.clear();
         normalizedAudoData.clear();
         vdaScore.clear();
+
+        // Migawka pre-rollu -- surowe próbki sprzed triggera, robimy jej
+        // kopię TERAZ, ale CELOWO nie trafia do newAudioQueue/
+        // audioDataToProcess: nie ma być przepuszczana przez rnnoise/licznik
+        // ciszy-mowy (patrz komentarz przy _prerollSnapshot w vad.hpp).
+        // Zostanie doklejona dopiero w update(), tuż przed oddaniem gotowego
+        // audio do callbacku.
+        {
+            std::lock_guard<std::mutex> lock(_historyMtx);
+            _prerollSnapshot.assign(_historyBuffer.begin(), _historyBuffer.end());
+        }
     }
     newAudioFlag = b;
 }
@@ -46,8 +75,75 @@ void VAD::update(DataTypes::VADDataCallback callback, std::atomic<bool>& state)
             _getVadAndNormalize();
             if(samplesCount >= quietThresholdTime)
             {
+                if (_speechStarted && _voicedFrameCount < MIN_VOICED_FRAMES)
+                {
+                    // Za mało realnej mowy (np. pojedynczy szum/echo, które
+                    // na moment przebiło próg) -- ignorujemy i wracamy do
+                    // nasłuchu, zamiast oddawać Whisperowi śmieci, na
+                    // których "wymyśla" tekst.
+                    std::cout << moduleName << "Ignoring false trigger (too little speech: "
+                              << _voicedFrameCount << " frames)" << std::endl;
+                    samplesCount = 0;
+                    _speechStarted = false;
+                    _voicedFrameCount = 0;
+                    normalizedAudoData.clear();
+                    vdaScore.clear();
+                    continue;
+                }
                 setNewAudio(false);
                 state.store(false);
+
+                // Doklejamy pre-roll (surowe audio sprzed triggera, BEZ
+                // przepuszczania przez VAD/próg mowy-ciszy) na sam POCZĄTEK
+                // dopiero teraz, gdy wiadomo, że to realna wypowiedź, a nie
+                // fałszywe wyzwolenie odrzucone wyżej.
+                if (!_prerollSnapshot.empty())
+                {
+                    std::vector<float> combined;
+                    combined.reserve(_prerollSnapshot.size() + normalizedAudoData.size());
+                    for (signed short s : _prerollSnapshot) combined.push_back(s / 32768.0f);
+                    combined.insert(combined.end(), normalizedAudoData.begin(), normalizedAudoData.end());
+                    normalizedAudoData = std::move(combined);
+                    _prerollSnapshot.clear();
+                }
+
+                // Wzmocnienie głośności: sygnał (zwłaszcza NAEC z Boostera --
+                // redukcja szumu/echa potrafi mocno przytłumić też samą mowę)
+                // bywa na tyle cichy, że Whisper ledwo go "słyszy" i źle
+                // rozpoznaje słowa. Skalujemy tak, by szczyt amplitudy sięgał
+                // ~0.9 (margines przed clippingiem) -- ale TYLKO gdy sygnał
+                // faktycznie jest cichszy niż to, żeby nie przycinać nagrań,
+                // które już są wystarczająco głośne.
+                {
+                    float peak = 0.0f;
+                    for (float s : normalizedAudoData) peak = std::max(peak, std::fabs(s));
+                    constexpr float TARGET_PEAK = 0.9f;
+                    if (peak > 0.0001f && peak < TARGET_PEAK)
+                    {
+                        float gain = TARGET_PEAK / peak;
+                        for (float& s : normalizedAudoData) s *= gain;
+                        std::cout << moduleName << "Wzmocniono ciche audio, gain=" << gain
+                                  << " (peak bylo " << peak << ")" << std::endl;
+                    }
+                }
+
+                // TYMCZASOWO na potrzeby diagnozy jakości rozpoznawania:
+                // zapisz dokładnie to audio (po VAD, z doklejonym
+                // pre-rollem), które za chwilę trafi do Whispera, do pliku
+                // WAV -- żeby można było je odsłuchać i ocenić, czy problem
+                // jest w samym sygnale (np. dalej zniekształcony/cichy) czy
+                // gdzieś dalej (Whisper/model/prompt). Plik ląduje w
+                // podfolderze "debug_audio" w katalogu roboczym programu
+                // (czyli tam, gdzie leży brain.exe -- w dist). Do usunięcia,
+                // gdy diagnoza się skończy.
+                {
+                    std::error_code ec;
+                    std::filesystem::create_directories("debug_audio", ec);
+                    std::string dbgFile = "debug_audio/rec_" + std::to_string(std::time(nullptr)) + ".wav";
+                    _exportToWav(dbgFile);
+                    std::cout << moduleName << "Zapisano audio testowe: " << dbgFile << std::endl;
+                }
+
                 callback(normalizedAudoData);
                 break;
             }
@@ -140,22 +236,63 @@ void VAD::_getVadAndNormalize()
 
             // calculating vad
             float score = rnnoise_process_frame(_rnnoise_state, temp_out, temp_in);
-            vdaScore.push_back(score); 
+            vdaScore.push_back(score);
             //std::cout << moduleName << "Procesed data score:" << score << std::endl;
+            _totalFrameCount++;
+
+            if (!_speechStarted)
+            {
+                // Dopóki użytkownik jeszcze nic nie powiedział, cisza na
+                // starcie NIE liczy się do warunku "koniec wypowiedzi" --
+                // wcześniej liczyła się od pierwszej ramki, więc po ~1.5s od
+                // wciśnięcia przycisku (zanim ktokolwiek zdążył cokolwiek
+                // powiedzieć) VAD uznawał wypowiedź za zakończoną i oddawał
+                // Whisperowi prawie pustą ramkę (stąd halucynacje typu
+                // "Dziękuję"/"Wszystkie prawa zastrzeżone").
+                if (score >= threshold)
+                {
+                    _speechStarted = true;
+                    _voicedFrameCount++;
+                    std::cout << moduleName << "Speech detected" << std::endl;
+                }
+                else if (_totalFrameCount >= MAX_RECORDING_FRAMES)
+                {
+                    // Zabezpieczenie -- mowa nigdy nie została pewnie
+                    // wykryta, nie nasłuchujemy w nieskończoność.
+                    std::cout << moduleName << "Timeout -- no speech detected" << std::endl;
+                    samplesCount = quietThresholdTime;
+                }
+                continue;
+            }
 
             if (samplesCount == 0 && score <= threshold)
             {
                 samplesCount = 1;
-                std::cout << moduleName << "Silience detected" << std::endl; 
+                std::cout << moduleName << "Silience detected" << std::endl;
             }
-            else if (samplesCount > 0) 
+            else if (samplesCount > 0)
             {
                 if(score >= threshold)
                 {
                     samplesCount = 0;
-                    std::cout << moduleName << "End of silience" << std::endl; 
+                    _voicedFrameCount++;
+                    std::cout << moduleName << "End of silience" << std::endl;
                 }
                 else samplesCount++;
+            }
+            else if (score >= threshold)
+            {
+                // samplesCount == 0 i score >= threshold -- dalej trwa
+                // mowa bez przerwy, tu też liczymy ją jako "głos".
+                _voicedFrameCount++;
+            }
+
+            if (_totalFrameCount >= MAX_RECORDING_FRAMES && samplesCount < quietThresholdTime)
+            {
+                // Zabezpieczenie -- twardy limit długości nagrania, nawet
+                // gdyby mowa trwała bez wystarczającej przerwy na końcu.
+                std::cout << moduleName << "Timeout -- max recording length reached" << std::endl;
+                samplesCount = quietThresholdTime;
             }
         }
         audioDataProcessed.clear();
