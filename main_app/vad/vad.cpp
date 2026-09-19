@@ -1,6 +1,4 @@
 #include "vad.hpp"
-#include <filesystem>
-#include <ctime>
 #include <cmath>
 
 void __stdcall VAD::audiCallback(const signed short *buffer, int count)
@@ -125,23 +123,6 @@ void VAD::update(DataTypes::VADDataCallback callback, std::atomic<bool>& state)
                         std::cout << moduleName << "Wzmocniono ciche audio, gain=" << gain
                                   << " (peak bylo " << peak << ")" << std::endl;
                     }
-                }
-
-                // TYMCZASOWO na potrzeby diagnozy jakości rozpoznawania:
-                // zapisz dokładnie to audio (po VAD, z doklejonym
-                // pre-rollem), które za chwilę trafi do Whispera, do pliku
-                // WAV -- żeby można było je odsłuchać i ocenić, czy problem
-                // jest w samym sygnale (np. dalej zniekształcony/cichy) czy
-                // gdzieś dalej (Whisper/model/prompt). Plik ląduje w
-                // podfolderze "debug_audio" w katalogu roboczym programu
-                // (czyli tam, gdzie leży brain.exe -- w dist). Do usunięcia,
-                // gdy diagnoza się skończy.
-                {
-                    std::error_code ec;
-                    std::filesystem::create_directories("debug_audio", ec);
-                    std::string dbgFile = "debug_audio/rec_" + std::to_string(std::time(nullptr)) + ".wav";
-                    _exportToWav(dbgFile);
-                    std::cout << moduleName << "Zapisano audio testowe: " << dbgFile << std::endl;
                 }
 
                 callback(normalizedAudoData);
@@ -299,55 +280,3 @@ void VAD::_getVadAndNormalize()
     }
 }
 
-void VAD::_exportToWav(const std::string& filename)
-{
-    // Otwieramy plik w trybie binarnym
-    std::ofstream file(filename, std::ios::binary);
-    if (!file)
-    {
-        std::cerr << moduleName << " Blad: Nie mozna otworzyc pliku do zapisu: " << filename << std::endl;
-        return;
-    }
-
-    uint32_t sample_rate = 16000; // Z Twojego kodu wynika, że to 16 kHz
-    uint16_t num_channels = 1;    // Mono
-    uint16_t bits_per_sample = 16;
-    
-    // Obliczamy rozmiary dla nagłówka WAV
-    uint32_t data_size = normalizedAudoData.size() * sizeof(int16_t);
-    uint32_t chunk_size = 36 + data_size;
-    uint32_t byte_rate = sample_rate * num_channels * sizeof(int16_t);
-    uint16_t block_align = num_channels * sizeof(int16_t);
-
-    // 1. Zapis subchunka RIFF
-    file.write("RIFF", 4);
-    file.write(reinterpret_cast<const char*>(&chunk_size), 4);
-    file.write("WAVE", 4);
-
-    // 2. Zapis subchunka fmt (format)
-    file.write("fmt ", 4);
-    uint32_t subchunk1_size = 16;
-    uint16_t audio_format = 1; // 1 oznacza nieskompresowane PCM
-    file.write(reinterpret_cast<const char*>(&subchunk1_size), 4);
-    file.write(reinterpret_cast<const char*>(&audio_format), 2);
-    file.write(reinterpret_cast<const char*>(&num_channels), 2);
-    file.write(reinterpret_cast<const char*>(&sample_rate), 4);
-    file.write(reinterpret_cast<const char*>(&byte_rate), 4);
-    file.write(reinterpret_cast<const char*>(&block_align), 2);
-    file.write(reinterpret_cast<const char*>(&bits_per_sample), 2);
-
-    // 3. Zapis subchunka data (dane audio)
-    file.write("data", 4);
-    file.write(reinterpret_cast<const char*>(&data_size), 4);
-
-    // 4. Konwersja z float [-1.0, 1.0] z powrotem na int16_t i zapis do pliku
-    for (float sample : normalizedAudoData)
-    {
-        // Zabezpieczenie (clamping), by nie przekroczyć zakresu int16_t
-        int16_t s = static_cast<int16_t>(std::max<float>(-32768.0f, std::min<float>(32767.0f, sample * 32767.0f)));
-        file.write(reinterpret_cast<const char*>(&s), 2);
-    }
-
-    file.close();
-    std::cout << moduleName << " Zapisano plik WAV (" << normalizedAudoData.size() << " probek): " << filename << std::endl;
-}

@@ -105,6 +105,4 @@ private:
     void _moveAudtioToProcessing();
     void _convertToFloat();
     void _getVadAndNormalize();
-
-    void _exportToWav(const std::string& filename);
 };
