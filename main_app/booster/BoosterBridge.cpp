@@ -180,8 +180,19 @@ void BoosterBridge::handleRawMessage(const std::string& line) {
             // jako zwykłe mono próbki, co psuło samą treść mowy (VAD widział
             // poprawny "kształt" energii, więc timing wyglądał OK, ale
             // Whisper dostawał zniekształcony sygnał i "wymyślał" tekst).
-            // Trzeba zdeinterleave'ować i zmiksować kanały do mono, zanim
-            // trafi do VAD/Whispera.
+            //
+            // Próbowaliśmy najpierw uśredniania wszystkich kanałów do mono --
+            // ale mikrofony są fizycznie rozsunięte, więc proste uśrednianie
+            // bez wyrównania fazy dawało zniekształcenia grzebieniowe (comb
+            // filtering). Próbowaliśmy też gotowego strumienia NAEC z SDK
+            // (beamforming + redukcja szumu/echa) -- ten był czysty
+            // technicznie, ale jego redukcja szumu okazała się działać jak
+            // bramka ucinająca/tłumiąca samą mowę, gdy mówca stał dalej niż
+            // ok. 0.5m od robota. Dlatego teraz po prostu WYBIERAMY JEDEN
+            // kanał (pierwszy z array'a) i ignorujemy pozostałe -- to nie
+            // daje zniekształceń grzebieniowych (nic nie jest mieszane) i
+            // nie ucina mowy z odległości (brak agresywnej redukcji szumu),
+            // kosztem nieco gorszego SNR niż dawałby poprawny beamforming.
             int channels = parseJsonInt(line, "\"channels\"", 1);
             if (channels < 1) channels = 1;
 
@@ -192,14 +203,13 @@ void BoosterBridge::handleRawMessage(const std::string& line) {
             } else {
                 int frameCount = totalSamples / channels;
                 if (frameCount > 0) {
-                    std::vector<signed short> mono(frameCount);
+                    std::vector<signed short> singleChannel(frameCount);
+                    constexpr int kChannelToUse = 0;
                     for (int f = 0; f < frameCount; f++) {
-                        long sum = 0;
                         const signed short* frame = samples + static_cast<size_t>(f) * channels;
-                        for (int c = 0; c < channels; c++) sum += frame[c];
-                        mono[f] = static_cast<signed short>(sum / channels);
+                        singleChannel[f] = frame[kChannelToUse];
                     }
-                    _audioCallback(mono.data(), frameCount);
+                    _audioCallback(singleChannel.data(), frameCount);
                 }
             }
         }

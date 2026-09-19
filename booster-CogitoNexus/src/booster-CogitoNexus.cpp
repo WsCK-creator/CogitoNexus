@@ -1267,27 +1267,35 @@ static void onAudioFrame(const booster::robot::audio::AudioCaptureFrame& frame) 
                    << " naec_pcm.size()=" << frame.naec_pcm.size() << std::endl;
     }
 
-    // Wolimy strumień NAEC (Noise + Acoustic Echo Cancellation) nad
-    // surowym -- "raw" to niezmiksowane próbki wprost z 3-mikrofonowego
-    // array'a (przed beamformingiem), które wcześniej naiwnie uśrednialiśmy
-    // do mono po stronie main_app (patrz BoosterBridge::handleRawMessage).
-    // Te mikrofony są fizycznie rozsunięte, więc proste uśrednianie kanałów
-    // bez wyrównania fazy powodowało zniekształcenia grzebieniowe (comb
-    // filtering) -- sygnał "wyglądał" na mowę (VAD/energia w porządku), ale
-    // Whisper dostawał zniekształconą treść i źle rozpoznawał słowa. NAEC to
-    // już gotowy, przetworzony przez SDK (beamforming + redukcja szumu/echa)
-    // pojedynczy kanał, przeznaczony właśnie pod rozpoznawanie mowy -- gdy
-    // jest dostępny, używamy go zamiast raw.
-    if (frame.naec_valid && !frame.naec_pcm.empty()) {
-        g_captureSampleRate = frame.naec_format.sample_rate_hz;
-        g_captureChannels = frame.naec_format.channels;
-        g_captureBitsPerSample = frame.naec_format.bits_per_sample;
-        g_audioStream.push(frame.naec_pcm);
-    } else if (frame.raw_valid && !frame.raw_pcm.empty()) {
+    // UWAGA -- WRÓCILIŚMY na "raw" (rezygnacja z NAEC), mimo że NAEC dawał
+    // technicznie czystszy sygnał (patrz komentarz historyczny niżej). W
+    // testach na żywo redukcja szumu w NAEC okazała się działać jak
+    // agresywna bramka szumów: gdy mówca stał dalej niż ok. 0.5m od robota,
+    // NAEC nie tylko czyścił szum, ale też ucinał/tłumił samą mowę --
+    // Whisper dostawał prawie ciszę. Nie ma w SDK parametru, żeby to
+    // złagodzić, więc korzystamy z "raw" i wybieramy z niego JEDEN kanał
+    // (patrz BoosterBridge::handleRawMessage w main_app), zamiast uśredniać
+    // wszystkie 3 -- uśrednianie fizycznie rozsuniętych mikrofonów bez
+    // wyrównania fazy powodowało zniekształcenia grzebieniowe (comb
+    // filtering), które i tak psuły jakość rozpoznawania. Wybór
+    // pojedynczego kanału tego nie robi, kosztem nieco gorszego SNR niż
+    // dawałby prawidłowy beamforming.
+    //
+    // Historia: NAEC to gotowy, przetworzony przez SDK (beamforming +
+    // redukcja szumu/echa) pojedynczy kanał, przeznaczony właśnie pod
+    // rozpoznawanie mowy -- stąd wcześniejsza preferencja dla niego nad
+    // "raw". Zostawiamy go jako fallback, gdyby "raw" z jakiegoś powodu nie
+    // był dostępny.
+    if (frame.raw_valid && !frame.raw_pcm.empty()) {
         g_captureSampleRate = frame.raw_format.sample_rate_hz;
         g_captureChannels = frame.raw_format.channels;
         g_captureBitsPerSample = frame.raw_format.bits_per_sample;
         g_audioStream.push(frame.raw_pcm);
+    } else if (frame.naec_valid && !frame.naec_pcm.empty()) {
+        g_captureSampleRate = frame.naec_format.sample_rate_hz;
+        g_captureChannels = frame.naec_format.channels;
+        g_captureBitsPerSample = frame.naec_format.bits_per_sample;
+        g_audioStream.push(frame.naec_pcm);
     }
 }
 
@@ -1730,14 +1738,11 @@ int main(int argc, char* argv[]) {
         for (const auto& fmt : kCandidates) {
             booster::robot::audio::AudioCaptureStreamOptions opts;
             opts.enable_raw_pcm = true;
-            // NAEC (Noise + Acoustic Echo Cancellation) to gotowy, przetworzony
-            // przez SDK pojedynczy kanał (beamforming + redukcja szumu/echa) --
-            // znacznie lepszy pod rozpoznawanie mowy niż surowe, fizycznie
-            // rozsunięte kanały mikrofonu-array w "raw", które przy naiwnym
-            // uśrednianiu do mono (patrz onAudioFrame/BoosterBridge) dawały
-            // zniekształcony, trudny do rozpoznania przez Whisper sygnał.
-            // Zostawiamy raw_pcm włączone jako fallback, gdyby NAEC nie był
-            // dostępny na danym firmware.
+            // Główny strumień to teraz "raw" (patrz szeroki komentarz przy
+            // onAudioFrame) -- NAEC dawał czystszy sygnał technicznie, ale
+            // jego redukcja szumu działała jak bramka ucinająca mowę powyżej
+            // ok. 0.5m od robota. Zostawiamy naec_pcm włączone jako fallback
+            // w onAudioFrame, gdyby "raw" z jakiegoś powodu nie był dostępny.
             opts.enable_naec_pcm = true;
             opts.requested_raw_format = {fmt.sample_rate_hz, fmt.channels, fmt.bits_per_sample};
             captureInitRet = capture->Init(opts);
@@ -1764,16 +1769,16 @@ int main(int argc, char* argv[]) {
                           << " (naec_enabled=" << info.naec_enabled << ")" << std::endl;
                 // Wartości startowe -- onAudioFrame i tak nadpisuje je co
                 // klatkę w zależności od tego, którego strumienia faktycznie
-                // używa (NAEC czy raw), ale to na wypadek gdyby "audio" miało
+                // używa (raw czy NAEC), ale to na wypadek gdyby "audio" miało
                 // pójść do klienta zanim pierwsza klatka w ogóle nadejdzie.
-                if (info.naec_enabled && info.actual_naec_format.sample_rate_hz > 0) {
-                    g_captureSampleRate = info.actual_naec_format.sample_rate_hz;
-                    g_captureChannels = info.actual_naec_format.channels;
-                    g_captureBitsPerSample = info.actual_naec_format.bits_per_sample;
-                } else if (info.actual_raw_format.sample_rate_hz > 0) {
+                if (info.raw_enabled && info.actual_raw_format.sample_rate_hz > 0) {
                     g_captureSampleRate = info.actual_raw_format.sample_rate_hz;
                     g_captureChannels = info.actual_raw_format.channels;
                     g_captureBitsPerSample = info.actual_raw_format.bits_per_sample;
+                } else if (info.actual_naec_format.sample_rate_hz > 0) {
+                    g_captureSampleRate = info.actual_naec_format.sample_rate_hz;
+                    g_captureChannels = info.actual_naec_format.channels;
+                    g_captureBitsPerSample = info.actual_naec_format.bits_per_sample;
                 }
             }
             int captureStartRet = capture->Start();

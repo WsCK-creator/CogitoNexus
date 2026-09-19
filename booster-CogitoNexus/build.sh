@@ -24,6 +24,15 @@ TTS_VENV_DIR="$PROJECT_DIR/tts_venv"
 MMS_MODEL_DIR="$PROJECT_DIR/mms-model/pl_PL"
 BUILD_DIR="$PROJECT_DIR/build"
 
+# Biblioteki natywne CUDA (m.in. libcudss.so.0) używane przez torch w
+# tts_venv leżą tutaj -- bez tego na ścieżce loadera "import torch" (a
+# więc i test w Kroku 1 poniżej) kończy się błędem
+# "libcudss.so.0: cannot open shared object file". Usługa systemd ma to
+# ustawione w swoim pliku .service, ale sam build.sh (uruchamiany ręcznie
+# w terminalu) tego nie dziedziczy, więc ustawiamy to też tutaj.
+NVIDIA_CU12_LIB="$TTS_VENV_DIR/lib/python3.10/site-packages/nvidia/cu12/lib"
+export LD_LIBRARY_PATH="$NVIDIA_CU12_LIB${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+
 # Colors
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
