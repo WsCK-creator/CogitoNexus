@@ -105,11 +105,34 @@ function Test-NeedsBuild {
     return $false
 }
 
+# --- Kopiowanie ikony i pliku do tworzenia skrótów do dist ---
+# Uwaga: NIE tworzymy tu skrótów automatycznie. Kopiujemy tylko ikonę
+# oraz CogitoNexus-Skroty.bat do dist, żeby użytkownik mógł go uruchomić
+# ręcznie (np. jako administrator, jeśli chce skróty na Pulpicie
+# Wszystkich Użytkowników / w Menu Start).
+function Copy-ShortcutTools {
+    if (!(Test-Path $dist)) { return }
+
+    $iconSource = "$PSScriptRoot\icons\CogitoNexus-icon.ico"
+    if (Test-Path $iconSource) {
+        cp $iconSource "$dist\CogitoNexus.ico" -Force
+    } else {
+        Write-Host "  -> Uwaga: brak ikony w $iconSource." -F DarkYellow
+    }
+
+    $scriptSource = "$PSScriptRoot\CogitoNexus-Skroty.bat"
+    if (Test-Path $scriptSource) {
+        cp $scriptSource "$dist\CogitoNexus-Skroty.bat" -Force
+    } else {
+        Write-Host "  -> Uwaga: brak pliku $scriptSource." -F DarkYellow
+    }
+}
+
 # --- Logika wyboru ---
 if ($Module -eq "bridge") { Build-Bridge }
 elseif ($Module -eq "brain") { Build-Brain }
 elseif ($Module -eq "all") { Build-Bridge; Build-Brain }
-else { 
+else {
     if (Test-NeedsBuild -SourceDir $bridge -TargetFile "$dist\nao_bridge\nao_bridge.dll") { Build-Bridge }
     else { Write-Host "> Most (nao_bridge) jest aktualny." -F Green }
 
@@ -117,4 +140,6 @@ else {
     else { Write-Host "> Mózg (main_app) jest aktualny." -F Green }
 }
 
-Write-Host "--- Gotowe ---" -F Cyan
+Copy-ShortcutTools
+
+Write-Host "--- Gotowe --- (aby utworzyć skróty, uruchom ręcznie dist\CogitoNexus-Skroty.bat)" -F Cyan
