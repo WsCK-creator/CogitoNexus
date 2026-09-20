@@ -75,6 +75,21 @@ function Build-Brain {
     Get-ChildItem -Path "$brain\build" -Recurse -Filter "*llama*.dll" | Copy-Item -Destination $llmDist -Force
     Get-ChildItem -Path "$brain\build" -Recurse -Filter "*ggml*.dll" | Copy-Item -Destination $llmDist -Force
 
+    # -- CUDA RUNTIME (cudart/cublas) --
+    # Dokładamy do dist same biblioteki RUNTIME'OWE CUDA (nie cały toolkit --
+    # ten jest potrzebny tylko do kompilacji). Dzięki temu skopiowany folder
+    # dist jest w pełni samowystarczalny -- na komputerze, na którym program
+    # ma tylko DZIAŁAĆ (a nie być budowany), wystarczy sam sterownik karty
+    # NVIDIA, bez instalowania całego CUDA Toolkit.
+    $cudaBinDir = "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.2\bin"
+    if (Test-Path $cudaBinDir) {
+        Get-ChildItem -Path $cudaBinDir -Filter "cudart64_*.dll" | Copy-Item -Destination $llmDist -Force
+        Get-ChildItem -Path $cudaBinDir -Filter "cublas64_*.dll" | Copy-Item -Destination $llmDist -Force
+        Get-ChildItem -Path $cudaBinDir -Filter "cublasLt64_*.dll" | Copy-Item -Destination $llmDist -Force
+    } else {
+        Write-Host "  -> Uwaga: nie znaleziono $cudaBinDir -- pomijam kopiowanie runtime'u CUDA." -F DarkYellow
+    }
+
     # -----------------------------------------------------------------
     # 4. AKTUALIZACJA PLIKU BAT (na wypadek ręcznego uruchamiania)
     # -----------------------------------------------------------------
